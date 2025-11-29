@@ -1,0 +1,4 @@
+textual>=0.40.0
+mutagen>=1.47.0
+ffmpeg-python>=0.2.0
+rich>=13.7.0
