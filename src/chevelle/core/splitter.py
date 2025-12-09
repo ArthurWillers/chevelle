@@ -68,7 +68,7 @@ class Splitter:
             paths: List of Path objects pointing to audio files
             
         Returns:
-            List of Track objects successfully loaded
+            List of Track objects successfully loaded (sorted alphabetically)
             
         Raises:
             TypeError: If paths is not a list or contains non-Path objects
@@ -76,8 +76,11 @@ class Splitter:
         if not isinstance(paths, list):
             raise TypeError(f"paths must be a list, got {type(paths)}")
         
+        # Sort paths alphabetically by filename
+        sorted_paths = sorted(paths, key=lambda p: p.name.lower())
+        
         tracks = []
-        for path in paths:
+        for path in sorted_paths:
             if not isinstance(path, Path):
                 print(f"⚠️ WARNING: Skipping non-Path object: {path}")
                 continue
