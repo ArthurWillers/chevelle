@@ -11,6 +11,33 @@ A high-performance TUI (Terminal User Interface) for mastering and burning Audio
 * **Gapless Mode:** Defaults to *Disk-At-Once* (DAO) to ensure continuous audio playback without artificial 2-second gaps.
 * **Linux Native:** Optimized for direct operation with local optical drives (`/dev/sr0`).
 
-## License
+## Installation & Usage
 
-This project is free software licensed under the **GNU General Public License v3.0 (GPLv3)**.
+### 1. System Requirements
+
+Chevelle relies on system tools for audio processing and burning. On Debian/Ubuntu-based distributions, you can install them via:
+```bash
+sudo apt update
+sudo apt install ffmpeg wodim
+```
+
+### 2. Python Environment
+
+It is highly recommended to run the app inside a Python virtual environment to avoid conflicts:
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+### 3. Running the App
+
+With the virtual environment active, navigate to the `src` directory and execute the module:
+```bash
+cd src
+python -m chevelle
+```
+
+## License
+This project is licensed under the GPL-3.0 License - see the [LICENSE](LICENSE)  file for details.
+
