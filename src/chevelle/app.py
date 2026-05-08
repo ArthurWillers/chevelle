@@ -543,6 +543,10 @@ class ChevelleApp(App):
     @work(exclusive=True, thread=False)
     async def perform_conversion(self) -> None:
         """Background worker for conversion - runs as an async task."""
+        # Wait a moment to ensure the screen is mounted
+        import asyncio
+        await asyncio.sleep(0.2)
+        
         total_tracks = sum(len(d.tracks) for d in self.discs)
         converted = 0
         
@@ -641,6 +645,10 @@ class ChevelleApp(App):
     @work(exclusive=True, thread=False)
     async def perform_burn(self) -> None:
         """Background worker for burning - runs as an async task."""
+        # Wait a moment to ensure the screen is mounted
+        import asyncio
+        await asyncio.sleep(0.2)
+        
         wav_files = self._current_burn_wav_files
         
         self.burn_screen.log_message(f"Starting burn of {len(wav_files)} tracks...")
