@@ -542,6 +542,9 @@ class ChevelleApp(App):
                     title="Conversion Complete"
                 )
             elif result and result.get("cancelled"):
+                self.conversion_cancelled = True
+                if self.converter:
+                    self.converter.cancel()
                 self.notify("Conversion cancelled", severity="warning")
         
         # Push the conversion screen first

@@ -183,18 +183,18 @@ class ConversionScreen(ModalScreen):
     def log_message(self, message: str) -> None:
         try:
             log = self.query_one("#convert_log", RichLog)
-            self.app.call_from_thread(log.write, message)
+            log.write(message)
         except Exception:
             pass
 
     def update_progress(self, current: int, total: int, status: str = "") -> None:
         try:
             progress = self.query_one("#convert_progress", ProgressBar)
-            self.app.call_from_thread(progress.update, total=total, progress=current)
+            progress.update(total=total, progress=current)
             
             if status:
                 status_widget = self.query_one("#convert_status", Static)
-                self.app.call_from_thread(status_widget.update, status)
+                status_widget.update(status)
         except Exception:
             pass
 

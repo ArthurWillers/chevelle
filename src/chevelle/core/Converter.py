@@ -22,6 +22,17 @@ class Converter:
     def __init__(self):
         if shutil.which('ffmpeg') is None:
             raise RuntimeError("FFmpeg isn't installed.")
+        self.process = None
+        self.cancelled = False
+
+    def cancel(self):
+        """Cancel the conversion and kill the ffmpeg process."""
+        self.cancelled = True
+        if self.process:
+            try:
+                self.process.kill()
+            except ProcessLookupError:
+                pass
 
     async def convert_batch(self, discs: list[Disc], output_dir: Path) -> AsyncGenerator[ConversionStatus, None]:
         total_discs = len(discs)
@@ -33,11 +44,17 @@ class Converter:
             disc_digits = 4
 
         for disc in discs:
+            if self.cancelled:
+                return
+            
             folder_name = f"CD_{disc.id:0{disc_digits}d}"
             disc_folder = output_dir / folder_name
             disc_folder.mkdir(parents=True, exist_ok=True)
             total_tracks = len(disc.tracks)
             for i, track in enumerate(disc.tracks, start=1):
+                if self.cancelled:
+                    return
+                
                 wav_name = f"{track.title}.wav"
                 full_output_path = disc_folder / wav_name
                 
@@ -84,11 +101,19 @@ class Converter:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE
             )
+            self.process = process
             stdout, stderr = await process.communicate()
             
             if process.returncode != 0:
                 error_msg = stderr.decode().strip()
                 return False, error_msg
             return True, None
+        except asyncio.CancelledError:
+            if self.process:
+                try:
+                    self.process.kill()
+                except ProcessLookupError:
+                    pass
+            raise
         except Exception as e:
             return False, str(e)
