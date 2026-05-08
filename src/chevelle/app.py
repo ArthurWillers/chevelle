@@ -538,7 +538,9 @@ class ChevelleApp(App):
         self.push_screen(self.conversion_screen, handle_result)
         
         # Start conversion after screen is shown
-        self.perform_conversion()
+        # Aguarda a tela renderizar para evitar exceptions
+        import asyncio
+        self.set_timer(0.5, self.perform_conversion)
 
     @work(exclusive=True, thread=False)
     async def perform_conversion(self) -> None:

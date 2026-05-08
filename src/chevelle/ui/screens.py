@@ -181,22 +181,31 @@ class ConversionScreen(ModalScreen):
             self.dismiss({"cancelled": False, "completed": True})
 
     def log_message(self, message: str) -> None:
-        log = self.query_one("#convert_log", RichLog)
-        log.write(message)
+        try:
+            log = self.query_one("#convert_log", RichLog)
+            self.app.call_from_thread(log.write, message)
+        except Exception:
+            pass
 
     def update_progress(self, current: int, total: int, status: str = "") -> None:
-        progress = self.query_one("#convert_progress", ProgressBar)
-        progress.update(total=total, progress=current)
-        
-        if status:
-            status_widget = self.query_one("#convert_status", Static)
-            status_widget.update(status)
+        try:
+            progress = self.query_one("#convert_progress", ProgressBar)
+            self.app.call_from_thread(progress.update, total=total, progress=current)
+            
+            if status:
+                status_widget = self.query_one("#convert_status", Static)
+                self.app.call_from_thread(status_widget.update, status)
+        except Exception:
+            pass
 
     def conversion_complete(self) -> None:
         """Called when conversion is finished."""
-        self.query_one("#cancel_btn", Button).disabled = True
-        self.query_one("#close_btn", Button).disabled = False
-        self.query_one("#convert_status", Static).update("Conversion complete!")
+        try:
+            self.query_one("#cancel_btn", Button).disabled = True
+            self.query_one("#close_btn", Button).disabled = False
+            self.query_one("#convert_status", Static).update("Conversion complete!")
+        except Exception:
+            pass
 
 
 class NewFolderScreen(ModalScreen):
