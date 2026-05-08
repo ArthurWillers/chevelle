@@ -1,6 +1,6 @@
 from pathlib import Path
 import asyncio
-import threading
+from textual import work
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -538,91 +538,39 @@ class ChevelleApp(App):
         self.push_screen(self.conversion_screen, handle_result)
         
         # Start conversion after screen is shown
-        self.set_timer(0.1, self._start_conversion_worker)
+        self.perform_conversion()
 
-    def _start_conversion_worker(self) -> None:
-        """Start the conversion in a background thread."""
-        # Start in a real thread
-        thread = threading.Thread(target=self._run_conversion_thread, daemon=True)
-        thread.start()
-
-    def _run_conversion_thread(self) -> None:
-        """Background worker for conversion - runs in separate thread."""
+    @work(exclusive=True, thread=False)
+    async def perform_conversion(self) -> None:
+        """Background worker for conversion - runs as an async task."""
         total_tracks = sum(len(d.tracks) for d in self.discs)
         converted = 0
         
-        # Calculate disc folder naming
-        total_discs = len(self.discs)
-        disc_digits = 2 if total_discs < 100 else (3 if total_discs < 1000 else 4)
+        self.conversion_screen.log_message(f"Starting conversion of {total_tracks} tracks...")
+        self.conversion_screen.log_message(f"Output: {self.dest_path}\n")
         
-        self.call_from_thread(
-            self.conversion_screen.log_message,
-            f"Starting conversion of {total_tracks} tracks..."
-        )
-        self.call_from_thread(
-            self.conversion_screen.log_message,
-            f"Output: {self.dest_path}"
-        )
-        self.call_from_thread(self.conversion_screen.log_message, "")
-        
-        for disc in self.discs:
+        async for status in self.converter.convert_batch(self.discs, self.dest_path):
             if self.conversion_cancelled:
-                self.call_from_thread(
-                    self.conversion_screen.log_message,
-                    "[red]Conversion cancelled[/]"
-                )
+                self.conversion_screen.log_message("[red]Conversion cancelled[/]")
                 return
             
-            # Create disc folder
-            folder_name = f"CD_{disc.id:0{disc_digits}d}"
-            disc_folder = self.dest_path / folder_name
-            disc_folder.mkdir(parents=True, exist_ok=True)
-            
-            self.call_from_thread(
-                self.conversion_screen.log_message,
-                f"[bold cyan]Creating {folder_name}...[/]"
-            )
-            
-            for i, track in enumerate(disc.tracks, 1):
-                if self.conversion_cancelled:
-                    self.call_from_thread(
-                        self.conversion_screen.log_message,
-                        "[red]Conversion cancelled[/]"
-                    )
-                    return
+            if status.completed:
+                self.conversion_screen.log_message("\n[green]All conversions complete![/]")
+                self.conversion_screen.conversion_complete()
+                break
                 
-                wav_name = f"{track.title}.wav"
-                full_output_path = disc_folder / wav_name
-                
-                self.call_from_thread(
-                    self.conversion_screen.log_message,
-                    f"  [{i}/{len(disc.tracks)}] {wav_name}"
+            if status.error:
+                self.conversion_screen.log_message(f"    [red]Error converting {status.filename}: {status.error}[/]")
+            else:
+                self.conversion_screen.log_message(
+                    f"  CD_{status.disc_id:02d} [{status.track_index}/{status.total_tracks}] {status.filename}"
                 )
-                
-                # Run ffmpeg
-                success = self.converter._run_ffmpeg(track.path, full_output_path)
-                
                 converted += 1
-                
-                self.call_from_thread(
-                    self.conversion_screen.update_progress,
+                self.conversion_screen.update_progress(
                     converted,
                     total_tracks,
-                    f"Converting: {track.title[:30]}..."
+                    f"Converted: {status.filename[:30]}..."
                 )
-                
-                if not success:
-                    self.call_from_thread(
-                        self.conversion_screen.log_message,
-                        f"    [red]Error converting {wav_name}[/]"
-                    )
-        
-        self.call_from_thread(self.conversion_screen.log_message, "")
-        self.call_from_thread(
-            self.conversion_screen.log_message,
-            "[green]All conversions complete![/]"
-        )
-        self.call_from_thread(self.conversion_screen.conversion_complete)
 
     def action_burn(self) -> None:
         """Open disc selection and burn."""
@@ -688,75 +636,43 @@ class ChevelleApp(App):
         self._current_burn_wav_files = wav_files
         
         # Start burning after screen is shown
-        self.set_timer(0.1, self._start_burn_worker)
+        self.perform_burn()
 
-    def _start_burn_worker(self) -> None:
-        """Start the burn in a background thread."""
-        thread = threading.Thread(target=self._run_burn_thread, daemon=True)
-        thread.start()
-
-    def _run_burn_thread(self) -> None:
-        """Background worker for burning - runs in separate thread."""
+    @work(exclusive=True, thread=False)
+    async def perform_burn(self) -> None:
+        """Background worker for burning - runs as an async task."""
         wav_files = self._current_burn_wav_files
         
-        self.call_from_thread(
-            self.burn_screen.log_message,
-            f"Starting burn of {len(wav_files)} tracks..."
-        )
-        self.call_from_thread(
-            self.burn_screen.log_message,
-            f"Device: {self.burn_device}, Speed: {self.burn_speed}x"
-        )
-        self.call_from_thread(self.burn_screen.log_message, "")
+        self.burn_screen.log_message(f"Starting burn of {len(wav_files)} tracks...")
+        self.burn_screen.log_message(f"Device: {self.burn_device}, Speed: {self.burn_speed}x\n")
         
         success = False
         
-        for status in self.burner.burn_disc(wav_files, eject=self.burn_eject):
+        async for status in self.burner.burn_disc(wav_files, eject=self.burn_eject):
             if self.burn_cancelled:
-                self.call_from_thread(
-                    self.burn_screen.log_message,
-                    "[red]Burn cancelled[/]"
-                )
+                self.burn_screen.log_message("[red]Burn cancelled[/]")
                 return
             
             # Log the message
             if status.message:
-                self.call_from_thread(
-                    self.burn_screen.log_message,
-                    status.message
-                )
+                self.burn_screen.log_message(status.message)
             
             # Update progress
             if status.phase == "burning":
-                self.call_from_thread(
-                    self.burn_screen.update_progress,
+                self.burn_screen.update_progress(
                     status.progress,
                     f"Track {status.track}/{status.total_tracks}"
                 )
             elif status.phase == "fixating":
-                self.call_from_thread(
-                    self.burn_screen.update_progress,
-                    99.0,
-                    "Fixating disc..."
-                )
+                self.burn_screen.update_progress(99.0, "Fixating disc...")
             elif status.phase == "complete":
                 success = True
-                self.call_from_thread(
-                    self.burn_screen.update_progress,
-                    100.0,
-                    "Complete!"
-                )
-                self.call_from_thread(
-                    self.burn_screen.log_message,
-                    "[green]Burn completed successfully![/]"
-                )
+                self.burn_screen.update_progress(100.0, "Complete!")
+                self.burn_screen.log_message("[green]Burn completed successfully![/]")
             elif status.phase == "error":
-                self.call_from_thread(
-                    self.burn_screen.log_message,
-                    f"[red]Error: {status.error}[/]"
-                )
+                self.burn_screen.log_message(f"[red]Error: {status.error}[/]")
         
-        self.call_from_thread(self.burn_screen.burn_complete, success)
+        self.burn_screen.burn_complete(success)
 
     def action_settings(self) -> None:
         """Open settings."""

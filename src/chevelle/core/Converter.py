@@ -1,8 +1,8 @@
 import shutil
-import subprocess
+import asyncio
 from pathlib import Path
 from dataclasses import dataclass
-from typing import Generator, Optional
+from typing import AsyncGenerator, Optional
 from .splitter import Disc
 
 @dataclass
@@ -14,12 +14,16 @@ class ConversionStatus:
     completed: bool = False
     error: Optional[str] = None
 
+class ConversionError(Exception):
+    """Custom exception for conversion failures."""
+    pass
+
 class Converter:
     def __init__(self):
         if shutil.which('ffmpeg') is None:
             raise RuntimeError("FFmpeg isn't installed.")
 
-    def convert_batch(self, discs: list[Disc], output_dir: Path) -> Generator[ConversionStatus, None, None]:
+    async def convert_batch(self, discs: list[Disc], output_dir: Path) -> AsyncGenerator[ConversionStatus, None]:
         total_discs = len(discs)
         if total_discs < 100:
             disc_digits = 2
@@ -36,15 +40,23 @@ class Converter:
             for i, track in enumerate(disc.tracks, start=1):
                 wav_name = f"{track.title}.wav"
                 full_output_path = disc_folder / wav_name
+                
                 yield ConversionStatus(
                     disc_id=disc.id,
                     track_index=i,
                     total_tracks=total_tracks,
                     filename=wav_name
                 )
-                success = self._run_ffmpeg(track.path, full_output_path)
+                
+                success, error_msg = await self._run_ffmpeg(track.path, full_output_path)
                 if not success:
-                    print(f"Error when converting: {wav_name}")
+                    yield ConversionStatus(
+                        disc_id=disc.id,
+                        track_index=i,
+                        total_tracks=total_tracks,
+                        filename=wav_name,
+                        error=error_msg
+                    )
 
         yield ConversionStatus(
             disc_id=0,
@@ -54,7 +66,7 @@ class Converter:
             completed=True
         )
 
-    def _run_ffmpeg(self, input_path: Path, output_path: Path) -> bool:
+    async def _run_ffmpeg(self, input_path: Path, output_path: Path) -> tuple[bool, Optional[str]]:
         cmd = [
             "ffmpeg",
             "-y", "-v", "error",
@@ -67,11 +79,16 @@ class Converter:
         ]
 
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True)
-            if result.returncode != 0:
-                print(f"Error FFmpeg ({input_path.name}): {result.stderr}")
-                return False
-            return True
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await process.communicate()
+            
+            if process.returncode != 0:
+                error_msg = stderr.decode().strip()
+                return False, error_msg
+            return True, None
         except Exception as e:
-            print(f"Error subprocess: {e}")
-            return False
+            return False, str(e)
