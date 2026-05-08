@@ -212,6 +212,7 @@ class ChevelleApp(App):
 
     BINDINGS = [
         Binding("q", "quit", "Quit", show=True),
+        Binding("r", "refresh", "Refresh", show=True),
         Binding("s", "set_source", "Source", show=True),
         Binding("d", "set_dest", "Dest", show=True),
         Binding("n", "new_folder", "New Folder", show=True),
@@ -319,6 +320,16 @@ class ChevelleApp(App):
             self.action_convert()
         elif button_id == "btn_burn":
             self.action_burn()
+
+    def action_refresh(self) -> None:
+        """Refresh the directory tree and current source folder if selected."""
+        tree = self.query_one("#directory_tree", SimpleDirectoryTree)
+        tree.reload()
+        
+        if self.source_path:
+            self._load_source_folder(self.source_path)
+            
+        self.notify("Directory tree refreshed", title="Refreshed")
 
     def action_set_source(self) -> None:
         """Set the source folder from current selection."""
