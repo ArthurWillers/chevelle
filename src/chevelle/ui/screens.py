@@ -505,6 +505,14 @@ class SettingsScreen(ModalScreen):
                     id="eject_switch"
                 )
             
+            # Normalize Audio
+            with Horizontal(classes="setting_row"):
+                yield Static("Normalize Vol:", classes="setting_label")
+                yield Switch(
+                    value=self.current_settings.get("normalize", False),
+                    id="normalize_switch"
+                )
+            
             # Mode (read-only info)
             with Horizontal(classes="setting_row"):
                 yield Static("Mode:", classes="setting_label")
@@ -523,12 +531,14 @@ class SettingsScreen(ModalScreen):
             # Gather values
             drive = self.query_one("#drive_input", Input).value
             speed_select = self.query_one("#speed_select", Select)
-            speed = speed_select.value if speed_select.value != Select.BLANK else 4
+            speed = speed_select.value
             eject = self.query_one("#eject_switch", Switch).value
+            normalize = self.query_one("#normalize_switch", Switch).value
             
             self.dismiss({
                 "drive": drive,
                 "speed": speed,
                 "eject": eject,
+                "normalize": normalize,
                 "dao": True
             })

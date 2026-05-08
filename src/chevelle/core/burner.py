@@ -117,7 +117,66 @@ class Burner:
                 
         except Exception as e:
             return {"present": False, "blank": False, "type": "Unknown", "error": str(e)}
-    
+
+    async def erase_disc(self) -> AsyncGenerator[BurnStatus, None]:
+        """Erase a CD-RW disc in the drive asynchronously."""
+        yield BurnStatus(phase="preparing", message="Checking drive for CD-RW...")
+        
+        disc_status = await self.check_disc_status()
+        if disc_status.get("error") or not disc_status.get("present"):
+            yield BurnStatus(phase="error", error="Drive check failed or no disc present.")
+            return
+
+        yield BurnStatus(phase="preparing", message=f"Erasing CD-RW on device {self.device} (fast blank)...")
+        
+        cmd = [
+            "wodim",
+            "-v",
+            "blank=fast",
+            f"dev={self.device}"
+        ]
+        
+        self.cancelled = False
+        
+        try:
+            self.process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT
+            )
+            
+            while True:
+                if self.cancelled:
+                    self.process.terminate()
+                    yield BurnStatus(phase="error", error="Erase cancelled by user")
+                    return
+                
+                line_bytes = await self.process.stdout.readline()
+                if not line_bytes:
+                    break
+                
+                line = line_bytes.decode(errors='replace').strip()
+                if not line:
+                    continue
+                
+                # Report generic progress for erase
+                if "blanking" in line.lower() or "erasing" in line.lower():
+                    yield BurnStatus(phase="burning", message=line, progress=50.0)
+                elif "error" in line.lower() or "cannot" in line.lower() or "failed" in line.lower():
+                    yield BurnStatus(phase="error", error=line)
+            
+            return_code = await self.process.wait()
+            
+            if return_code == 0:
+                yield BurnStatus(phase="complete", progress=100.0, message="CD-RW successfully erased!")
+            else:
+                yield BurnStatus(phase="error", error=f"wodim exited with code {return_code}")
+                
+        except Exception as e:
+            yield BurnStatus(phase="error", error=str(e))
+        finally:
+            self.process = None
+
     async def burn_disc(self, wav_files: list[Path], eject: bool = True) -> AsyncGenerator[BurnStatus, None]:
         """Burn WAV files to an audio CD using wodim asynchronously.
         

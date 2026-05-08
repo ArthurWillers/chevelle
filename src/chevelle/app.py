@@ -1,5 +1,7 @@
 from pathlib import Path
 import asyncio
+import os
+import json
 from textual import work
 
 from textual.app import App, ComposeResult
@@ -219,6 +221,7 @@ class ChevelleApp(App):
         Binding("m", "toggle_split_mode", "Mode", show=True),
         Binding("c", "convert", "Convert", show=True),
         Binding("b", "burn", "Burn", show=True),
+        Binding("e", "erase_disc", "Erase RW", show=True),
         Binding("f", "settings", "Settings", show=True),
     ]
 
@@ -245,6 +248,60 @@ class ChevelleApp(App):
         self.burn_device = "/dev/sr0"
         self.burn_speed = 4
         self.burn_eject = True
+        self.normalize_audio = False
+        
+        self._config_file = Path.home() / ".config" / "chevelle.json"
+        self._load_preferences()
+
+    def _load_preferences(self) -> None:
+        """Load preferences from ~/.config/chevelle.json"""
+        if self._config_file.exists():
+            try:
+                with open(self._config_file, "r") as f:
+                    prefs = json.load(f)
+                    
+                device = prefs.get("burn_device")
+                if device:
+                    self.burn_device = device
+                speed = prefs.get("burn_speed")
+                if speed is not None:
+                    self.burn_speed = speed
+                eject = prefs.get("burn_eject")
+                if eject is not None:
+                    self.burn_eject = eject
+                norm = prefs.get("normalize_audio")
+                if norm is not None:
+                    self.normalize_audio = norm
+                    
+                stored_source = prefs.get("source_path")
+                if stored_source and Path(stored_source).exists():
+                    self.source_path = Path(stored_source)
+                    self._load_source_folder(self.source_path)
+                    
+                stored_dest = prefs.get("dest_path")
+                if stored_dest and Path(stored_dest).exists():
+                    self.dest_path = Path(stored_dest)
+                    self._update_buttons()
+
+            except Exception as e:
+                self.notify(f"Error loading preferences: {e}", severity="warning")
+
+    def _save_preferences(self) -> None:
+        """Save preferences to ~/.config/chevelle.json"""
+        try:
+            self._config_file.parent.mkdir(parents=True, exist_ok=True)
+            prefs = {
+                "burn_device": self.burn_device,
+                "burn_speed": self.burn_speed,
+                "burn_eject": self.burn_eject,
+                "normalize_audio": getattr(self, "normalize_audio", False),
+                "source_path": str(self.source_path) if self.source_path else None,
+                "dest_path": str(self.dest_path) if self.dest_path else None
+            }
+            with open(self._config_file, "w") as f:
+                json.dump(prefs, f, indent=4)
+        except Exception as e:
+            self.notify(f"Error saving preferences: {e}", severity="warning")
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -296,6 +353,14 @@ class ChevelleApp(App):
         tree = self.query_one("#directory_tree", SimpleDirectoryTree)
         tree.show_root = False
         tree.show_guides = True
+        
+        # Hydrate initial load display if saved paths were resolved
+        if self.source_path:
+            source_display = self.query_one("#source_display", Static)
+            source_display.update(str(self.source_path))
+        if self.dest_path:
+            dest_display = self.query_one("#dest_display", Static)
+            dest_display.update(str(self.dest_path))
 
     def on_directory_tree_directory_selected(self, event: DirectoryTree.DirectorySelected) -> None:
         """When a directory is selected, show which action is available."""
@@ -371,20 +436,15 @@ class ChevelleApp(App):
         source_display = self.query_one("#source_display", Static)
         source_display.update(str(path))
         
-        # Find audio files (MP3 and WAV)
-        mp3_files = list(path.glob("*.mp3"))
-        wav_files = list(path.glob("*.wav"))
-        audio_files = mp3_files + wav_files
+        # Find audio files (MP3, WAV, FLAC, OGG, M4A)
+        audio_files = []
+        for ext in ["*.mp3", "*.wav", "*.flac", "*.ogg", "*.m4a"]:
+            audio_files.extend(list(path.glob(ext)))
         
         if not audio_files:
             self.notify(f"No audio files in {path.name}", severity="warning")
             self._show_empty_preview("No audio files found")
             return
-        
-        # Determine file type
-        file_type = "MP3" if mp3_files else "WAV"
-        if mp3_files and wav_files:
-            file_type = "Mixed (MP3/WAV)"
         
         # Load tracks
         try:
@@ -407,7 +467,7 @@ class ChevelleApp(App):
             total_time = sum(d.total_seconds for d in self.discs)
             mode_name = "Sequential" if self.split_mode == "sequential" else "Fill Gaps"
             self.notify(
-                f"Found {len(self.tracks)} {file_type} files -> {len(self.discs)} disc(s) [{mode_name}]",
+                f"Found {len(self.tracks)} audio files -> {len(self.discs)} disc(s) [{mode_name}]",
                 title="Source Loaded"
             )
             
@@ -526,6 +586,18 @@ class ChevelleApp(App):
             self.notify("Set source and destination first", severity="warning")
             return
         
+        # Check predictive disk space (1 minute of CD audio = ~10.58MB or 10,584,000 bytes)
+        total_seconds = sum(d.total_seconds for d in self.discs)
+        required_bytes = total_seconds * 176400  # 44100 Hz * 2 channels * 2 bytes (16-bit)
+        
+        import shutil
+        total, used, free = shutil.disk_usage(self.dest_path)
+        if free < required_bytes:
+            required_mb = required_bytes / (1024 * 1024)
+            free_mb = free / (1024 * 1024)
+            self.notify(f"Not enough space on destination.\nRequired: {required_mb:.1f} MB, Free: {free_mb:.1f} MB", severity="error")
+            return
+
         # Check if FFmpeg is available
         try:
             self.converter = Converter()
@@ -567,9 +639,10 @@ class ChevelleApp(App):
         converted = 0
         
         self.conversion_screen.log_message(f"Starting conversion of {total_tracks} tracks...")
-        self.conversion_screen.log_message(f"Output: {self.dest_path}\n")
+        self.conversion_screen.log_message(f"Output: {self.dest_path}")
+        self.conversion_screen.log_message(f"Normalization: {'Yes' if self.normalize_audio else 'No'}\n")
         
-        async for status in self.converter.convert_batch(self.discs, self.dest_path):
+        async for status in self.converter.convert_batch(self.discs, self.dest_path, normalize=self.normalize_audio):
             if self.conversion_cancelled:
                 self.conversion_screen.log_message("[red]Conversion cancelled[/]")
                 return
@@ -698,6 +771,55 @@ class ChevelleApp(App):
         
         self.burn_screen.burn_complete(success)
 
+    def action_erase_disc(self) -> None:
+        """Erase a CD-RW."""
+        try:
+            self.burner = Burner(device=self.burn_device, speed=self.burn_speed)
+        except RuntimeError as e:
+            self.notify(str(e), severity="error")
+            return
+            
+        self.burn_cancelled = False
+        
+        def handle_erase_result(result):
+            if result and result.get("completed"):
+                self.notify("Erased CD-RW successfully!", title="Erase Complete")
+            elif result and result.get("cancelled"):
+                self.burner.cancel()
+                self.burn_cancelled = True
+                self.notify("Erase cancelled", severity="warning")
+                
+        self.burn_screen = BurningScreen(disc_name="Erase CD-RW", track_count=0)
+        self.push_screen(self.burn_screen, handle_erase_result)
+        self.perform_erase()
+
+    @work(exclusive=True, thread=False)
+    async def perform_erase(self) -> None:
+        import asyncio
+        await asyncio.sleep(0.2)
+        
+        self.burn_screen.log_message(f"Starting Erase CD-RW on device {self.burn_device}...\n")
+        
+        success = False
+        async for status in self.burner.erase_disc():
+            if self.burn_cancelled:
+                self.burn_screen.log_message("[red]Erase cancelled[/]")
+                return
+            
+            if status.message:
+                self.burn_screen.log_message(status.message)
+                
+            if status.phase == "burning":
+                self.burn_screen.update_progress(status.progress, "Erasing CD-RW...")
+            elif status.phase == "complete":
+                success = True
+                self.burn_screen.update_progress(100.0, "Complete!")
+                self.burn_screen.log_message("[green]CD-RW successfully erased![/]")
+            elif status.phase == "error":
+                self.burn_screen.log_message(f"[red]Error: {status.error}[/]")
+                
+        self.burn_screen.burn_complete(success)
+
     def action_settings(self) -> None:
         """Open settings."""
         def handle_result(result):
@@ -705,26 +827,33 @@ class ChevelleApp(App):
                 self.burn_device = result.get("drive", "/dev/sr0")
                 self.burn_speed = result.get("speed", 4)
                 self.burn_eject = result.get("eject", True)
+                self.normalize_audio = result.get("normalize", False)
                 eject_str = "Yes" if self.burn_eject else "No"
+                norm_str = "Yes" if self.normalize_audio else "No"
                 self.notify(
-                    f"Device: {self.burn_device}, Speed: {self.burn_speed}x, Eject: {eject_str}",
+                    f"Device: {self.burn_device}, Speed: {self.burn_speed}x, Eject: {eject_str}, Norm: {norm_str}",
                     title="Settings Saved"
                 )
+                self._save_preferences()
         
         current_settings = {
             "drive": self.burn_device,
             "speed": self.burn_speed,
-            "eject": self.burn_eject
+            "eject": self.burn_eject,
+            "normalize": self.normalize_audio
         }
         self.push_screen(SettingsScreen(current_settings), handle_result)
 
     def watch_source_path(self, old_value, new_value) -> None:
         """React when source path changes."""
         self.selecting_for = "dest" if new_value else "source"
+        if new_value:
+            self._save_preferences()
 
     def watch_dest_path(self, old_value, new_value) -> None:
         """React when dest path changes."""
-        pass
+        if new_value:
+            self._save_preferences()
 
 
 if __name__ == "__main__":

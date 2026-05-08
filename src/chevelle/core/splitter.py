@@ -1,7 +1,5 @@
 from dataclasses import dataclass, field
 from pathlib import Path
-from mutagen.mp3 import MP3
-
 
 @dataclass
 class Track:
@@ -94,8 +92,9 @@ class Splitter:
                 continue
             
             try:
-                audio = MP3(path)
-                if not hasattr(audio, 'info') or not hasattr(audio.info, 'length'):
+                import mutagen
+                audio = mutagen.File(path)
+                if audio is None or not hasattr(audio, 'info') or not hasattr(audio.info, 'length'):
                     print(f"⚠️ WARNING: Could not read duration from {path.name}")
                     continue
                     

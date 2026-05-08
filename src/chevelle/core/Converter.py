@@ -34,7 +34,7 @@ class Converter:
             except ProcessLookupError:
                 pass
 
-    async def convert_batch(self, discs: list[Disc], output_dir: Path) -> AsyncGenerator[ConversionStatus, None]:
+    async def convert_batch(self, discs: list[Disc], output_dir: Path, normalize: bool = False) -> AsyncGenerator[ConversionStatus, None]:
         total_discs = len(discs)
         if total_discs < 100:
             disc_digits = 2
@@ -65,7 +65,7 @@ class Converter:
                     filename=wav_name
                 )
                 
-                success, error_msg = await self._run_ffmpeg(track.path, full_output_path)
+                success, error_msg = await self._run_ffmpeg(track.path, full_output_path, normalize)
                 if not success:
                     yield ConversionStatus(
                         disc_id=disc.id,
@@ -83,7 +83,7 @@ class Converter:
             completed=True
         )
 
-    async def _run_ffmpeg(self, input_path: Path, output_path: Path) -> tuple[bool, Optional[str]]:
+    async def _run_ffmpeg(self, input_path: Path, output_path: Path, normalize: bool) -> tuple[bool, Optional[str]]:
         cmd = [
             "ffmpeg",
             "-y", "-v", "error",
@@ -91,9 +91,12 @@ class Converter:
             "-ar", "44100",
             "-ac", "2",
             "-f", "wav",
-            "-c:a", "pcm_s16le",
-            str(output_path)
+            "-c:a", "pcm_s16le"
         ]
+        if normalize:
+            cmd.extend(["-af", "loudnorm"])
+            
+        cmd.append(str(output_path))
 
         try:
             process = await asyncio.create_subprocess_exec(
