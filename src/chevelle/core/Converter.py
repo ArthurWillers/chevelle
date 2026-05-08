@@ -21,7 +21,7 @@ class ConversionError(Exception):
 class Converter:
     def __init__(self):
         if shutil.which('ffmpeg') is None:
-            raise RuntimeError("FFmpeg isn't installed.")
+            raise RuntimeError("FFmpeg isn't installed. Please install it to continue.")
         self.process = None
         self.cancelled = False
 

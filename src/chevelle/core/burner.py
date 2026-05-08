@@ -36,7 +36,7 @@ class Burner:
             RuntimeError: If wodim is not installed
         """
         if shutil.which('wodim') is None:
-            raise RuntimeError("wodim is not installed. Install it with: sudo apt install wodim")
+            raise RuntimeError("wodim is not installed. Please install it to continue.")
         
         self.device = device
         self.speed = speed
